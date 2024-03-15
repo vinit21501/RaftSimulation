@@ -3,7 +3,17 @@ syntax = "proto3";
 package raft;
 
 service Raft {
-    rpc ServeClient (ServeClientArgs) returns (ServeClientReply) {}
+    rpc ServeClient (ServeClientArgs) returns (ServeClientReply);
+	rpc voteFor(VoteForRequest) returns (SuccessReply);
+}
+
+message VoteForRequest {
+	string ip = 1;
+	int term = 2;
+}
+
+message SuccessReply {
+	bool success = 1;
 }
 
 message ServeClientArgs {
