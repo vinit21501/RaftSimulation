@@ -5,6 +5,10 @@ package raft;
 service Raft {
     rpc ServeClient (ServeClientArgs) returns (ServeClientReply);
 	rpc voteFor(VoteForRequest) returns (SuccessReply);
+	rpc ReceiveAck(VoteForRequest) returns (SuccessReply);
+	rpc HeartBeat(heartbeatRequest) returns (SuccessReply);
+	rpc AppendEntry(heartbeatRequest) returns (SuccessReply);
+	rpc CommitEntry(receiveVarRequest) returns (SuccessReply);
 }
 
 message VoteForRequest {
@@ -12,8 +16,24 @@ message VoteForRequest {
 	int32 term = 2;
 }
 
+message receiveVarRequest {
+	float leasetime = 1;
+	int32 term = 2;
+	string var = 3;
+	int32 val = 4;
+}
+
 message SuccessReply {
 	bool success = 1;
+}
+
+message heartbeatRequest {
+	float leasetime = 1;
+}
+
+message LeaderElect {
+	string ip = 1;
+	int32 term = 2;
 }
 
 message ServeClientArgs {
