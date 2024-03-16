@@ -3,6 +3,7 @@ import raft_pb2
 import raft_pb2_grpc
 from concurrent import futures
 import random
+import time
 
 random.seed(0)
 
@@ -42,13 +43,20 @@ currentRole = 'candidate'
 votedFor = 'nodeId'
 votesReceived = {'nodeId'}
 lastTerm = 0
-if log.length > 0 :
-    lastTerm = log[log.length - 1].term
-msg = ('VoteRequest', 'nodeId', currentTerm, log.length, lastTerm)
-for node in nodes:
-    # send msg to node
-    pass
-# start election timer
+# if log.length > 0 :
+#     lastTerm = log[log.length - 1].term
+# msg = ('VoteRequest', 'nodeId', currentTerm, log.length, lastTerm)
+# for node in nodes:
+#     # send msg to node
+#     pass
+# # start election timer
+
+def callrpc(rpc, req):
+    try:
+        rep = rpc(req, timeout=1)
+        return rep
+    except:
+        return None
 
 class RaftServicer(raft_pb2_grpc.RaftServicer):
     def ServeClient(self, request, context):
@@ -60,14 +68,14 @@ class RaftServicer(raft_pb2_grpc.RaftServicer):
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    raft_pb2_grpc.RaftServicer_to_server(RaftServicer(), server)
+    raft_pb2_grpc.add_RaftServicer_to_server(RaftServicer(), server)
     server.add_insecure_port("[::]:" + recieverPort)
     server.start()
     server.wait_for_termination()
 
 class RequestFollower():
     def __init__(self, nodeCount, ips):
-        self.channelList = list(map(lambda ip : grpc.insecure_channel(ip + ':' + senderPort), ips))
+        self.channelList = list(map(lambda ip : grpc.insecure_channel(ip + ':' + senderPort, options=[('grpc.default_timeout_ms', 1000)]), ips))
         self.stubList = list(map(lambda ch : raft_pb2_grpc.RaftStub(ch), self.channelList))
     def requestVote(self):
         votes = []
@@ -81,10 +89,6 @@ class RequestFollower():
         return voteTotal
 
 
-def run():
-    with grpc.insecure_channel('localhost:' + senderPort) as channel:
-        stub = raft_pb2_grpc.RaftStub(channel)
-        stub.ServeClient(request)
 
 if __name__ == "__main__":
     pass
