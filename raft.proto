@@ -3,37 +3,38 @@ syntax = "proto3";
 package raft;
 
 service Raft {
-    rpc ServeClient (ServeClientArgs) returns (ServeClientReply);
-	rpc voteFor(VoteForRequest) returns (SuccessReply);
-	rpc ReceiveAck(VoteForRequest) returns (SuccessReply);
-	rpc HeartBeat(heartbeatRequest) returns (SuccessReply);
-	rpc AppendEntry(heartbeatRequest) returns (SuccessReply);
-	rpc CommitEntry(receiveVarRequest) returns (SuccessReply);
+	rpc AppendEntries (AppendRequest) returns (AppendReply);
+	rpc RequestVote (RequestVoteRequest) returns (RequestVoteReply);
 }
 
-message VoteForRequest {
-	string ip = 1;
-	int32 term = 2;
+message AppendRequest {
+	int32 term = 1;
+	int32 leaderId = 2;
+	int32 prevLogIndex = 3;
+	int32 prevLogTerm = 4;
+	repeated string entries = 5;
+	int32 leaderCommit = 6;
 }
 
-message receiveVarRequest {
-	float leasetime = 1;
-	int32 term = 2;
-	string var = 3;
-	int32 val = 4;
+message AppendReply {
+	int32 term = 1;
+	bool success = 3;
+}
+
+message RequestVoteRequest {
+	int32 term = 1;
+	int32 candidateId = 2;
+	int32 lastLogIndex = 3;
+	int32 lastlogTerm = 4;
+}
+
+message RequestVoteReply {
+	int32 term = 1;
+	bool voteGranted = 2;
 }
 
 message SuccessReply {
 	bool success = 1;
-}
-
-message heartbeatRequest {
-	float leasetime = 1;
-}
-
-message LeaderElect {
-	string ip = 1;
-	int32 term = 2;
 }
 
 message ServeClientArgs {
