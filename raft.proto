@@ -5,6 +5,17 @@ package raft;
 service Raft {
 	rpc AppendEntries (AppendRequest) returns (AppendReply);
 	rpc RequestVote (RequestVoteRequest) returns (RequestVoteReply);
+	rpc ServeClient (ServeClientArgs) returns (ServeClientReply);
+}
+
+message ServeClientArgs {
+  string Request = 1;
+}
+
+message ServeClientReply {
+  string Data = 1;
+  string LeaderID = 2;
+  bool Success = 3;
 }
 
 message AppendRequest {
@@ -25,7 +36,7 @@ message RequestVoteRequest {
 	int32 term = 1;
 	int32 candidateId = 2;
 	int32 lastLogIndex = 3;
-	int32 lastlogTerm = 4;
+	int32 lastLogTerm = 4;
 }
 
 message RequestVoteReply {
