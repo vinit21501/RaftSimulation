@@ -3,17 +3,24 @@ import raft_pb2
 import raft_pb2_grpc
 from concurrent import futures
 import random
-import time
 import os
 import threading
 
-localIP = 'localhost'
-# clusterIp = ['localhost:50052', 'localhost:50053']
-clusterIp = {2:'localhost:50052', 3:'localhost:50053'}
-# senderPort = '50051'
-recieverPort = '50051'
-nodeTotal = 3
+# clear && python raft.py
+# nodeId = 2
+# recieverPort = '50052'
+# clusterIp = {1:'localhost:50051', 3:'localhost:50053'}
+
+# nodeId = 3
+# recieverPort = '50053'
+# clusterIp = {1:'localhost:50051', 2:'localhost:50052'}
+
 nodeId = 1
+recieverPort = '50051'
+clusterIp = {2:'localhost:50052', 3:'localhost:50053'}
+
+localIP = 'localhost'
+nodeTotal = 3
 leaseTime = 2.5
 
 # currentTerm = 0
@@ -47,7 +54,10 @@ class State():
         else:
             os.mkdir(f'logs_node_{self.nodeId}')
             open(f'logs_node_{self.nodeId}/metadata.txt', 'w').close()
+        if not os.path.exists(f'logs_node_{self.nodeId}/dump.txt'):
+            open(f'logs_node_{self.nodeId}/dump.txt', 'w').close()
         self.readLogs()
+        self.export()
     def resetIndex(self):
         self.nextIndex = {i:self.commitIndex for i in range(cluster.totalNode)}
         self.matchIndex = {i:self.commitIndex for i in range(cluster.totalNode)}
@@ -71,14 +81,14 @@ class State():
     def appendEntries(self, log=None):
         with open(f'logs_node_{self.nodeId}/log.txt', 'a') as file:
             # for entry in self.logs:
-            if log:
+            if log != None:
                 file.write(log + '\n')
             else:
                 for entry in self.logs:
-                    file.write(entry + '\n')
-
+                    file.write(entry[1] + '\n')
+        self.export()
     def writeDump(self, query):
-        with open(f'logs_node_{self.nodeId}/dump.txt') as file:
+        with open(f'logs_node_{self.nodeId}/dump.txt', 'a') as file:
             file.write(query + '\n')
     def commitEntries(self, leaderCommit):
         if leaderCommit > self.commitIndex:
@@ -88,7 +98,9 @@ class State():
                     log = log.strip().split()
                     self.logDic[log[1]] = log[2]
             self.logs = []
+            self.export()
             return True
+        self.export()
         return False
     def leaderCommitEntries(self):
         for log in self.logs[self.commitIndex:]:
@@ -96,44 +108,15 @@ class State():
             if log.startswith('SET'):
                 log = log.strip().split()
                 self.logDic[log[1]] = log[2]
-
-# # initialisation
-# logs = ['NO-OP']
-# commitLength = 0
-
-# currentLeader = None
-# votesReceived = {}
-# sentLength = 'hi'
-# ackedLength = 'h'
-
-# nodes = {}
-
-# # recovery from crash
-
-# votesReceived = {}
-# sentLength = 'hi'
-# ackedLength = 'hi'
-
-# # node nodeId suspects leader has failed, or on election timeout
-# currentTerm = currentTerm + 1
-# currentRole = 'candidate'
-# votedFor = 'nodeId'
-# votesReceived = {'nodeId'}
-# lastTerm = 0
-# if log.length > 0 :
-#     lastTerm = log[log.length - 1].term
-# msg = ('VoteRequest', 'nodeId', currentTerm, log.length, lastTerm)
-# for node in nodes:
-#     # send msg to node
-#     pass
-# # start election timer
+        self.export()
 
 class RaftServicer(raft_pb2_grpc.RaftServicer):
     def AppendEntries(self, request, context):
         rep = raft_pb2.AppendReply()
         rep.term = stateMachine.currentTerm
         # if request.prevLogIndex  ==  stateMachine.lastApplied and request.prevLogTerm == stateMachine.currentlogTerm:
-        if request.term == stateMachine.currentTerm and request.prevLogTerm == stateMachine.currentlogTerm and request.prevLogIndex == stateMachine.lastApplied:
+        print(request.term, stateMachine.currentTerm, request.prevLogTerm, stateMachine.currentlogTerm, request.prevLogIndex, stateMachine.lastApplied)
+        if request.term >= stateMachine.currentTerm and request.prevLogTerm >= stateMachine.currentlogTerm and request.prevLogIndex == stateMachine.lastApplied - 1:
             stateMachine.currentTerm = request.term
             rep.term = stateMachine.currentTerm
             stateMachine.currentLeader = request.leaderId
@@ -141,24 +124,28 @@ class RaftServicer(raft_pb2_grpc.RaftServicer):
             # request.leaderCommit
             stateMachine.commitEntries(request.leaderCommit)
             stateMachine.commitIndex = request.leaderCommit
-            stateMachine.logs = request.entries
+            stateMachine.logs = list((stateMachine.lastApplied + 1 + i, log, int(log.split()[-1])) for i, log in enumerate(request.entries))
             stateMachine.appendEntries()
             stateMachine.lastApplied += len(request.entries)
+            cluster.resetheartbeat()
             rep.success = True
             return rep
+        cluster.resetheartbeat()
         rep.success = False
         return rep
     def RequestVote(self, request, context):
         rep = raft_pb2.RequestVoteReply()
         rep.term = stateMachine.currentTerm
-        if stateMachine.votedFor == None and stateMachine.currentRole != 'leader':
+        if stateMachine.votedFor == None and stateMachine.currentRole != 'candidate':
+            print(request.term, stateMachine.currentTerm, stateMachine.lastApplied, request.lastLogIndex, stateMachine.currentlogTerm, request.lastLogTerm)
             if request.term >= stateMachine.currentTerm and stateMachine.lastApplied <= request.lastLogIndex and stateMachine.currentlogTerm <= request.lastLogTerm:
                 stateMachine.votedFor = request.candidateId
                 rep.voteGranted = True
                 # currentLeader = request.candidateId
                 # currentRole = 'follower'
                 # cancel the election or restart
-                cluster.election.cancel()
+                cluster.resetelection()
+                print("voted for", request.candidateId)
                 return rep
             # handle this parameter for vote granted
             # request.lastLogIndex
@@ -177,6 +164,8 @@ class NodeWorking():
     def __init__(self, nodeCount, ips, leaseTime):
         self.totalNode = nodeCount
         self.leaseTime = leaseTime
+        self.beattime = threading.Timer(1, self.appendEntry)
+        self.leaseThread = threading.Timer(self.leaseTime, self.stepDown)
         # self.channelList = list(map(lambda ip : grpc.insecure_channel(ip + ':' + senderPort, options=[('grpc.default_timeout_ms', 1000)]), ips))
         self.channelList = dict(zip(ips.keys(), map(lambda ip : grpc.insecure_channel(ips[ip], options=[('grpc.default_timeout_ms', 1000)]), ips)))
         self.stubList = dict(zip(ips.keys(), map(lambda ch : raft_pb2_grpc.RaftStub(self.channelList[ch]), self.channelList)))
@@ -194,26 +183,30 @@ class NodeWorking():
             req.candidateId = stateMachine.nodeId
             req.term = stateMachine.currentTerm
             req.lastLogIndex = stateMachine.commitIndex
-            req.lastLogTerm = stateMachine.logs[stateMachine.commitIndex - 1](2)
+            print(stateMachine.logs)
+            print(stateMachine.commitIndex)
+            if len(stateMachine.logs) >= 1:
+                print(stateMachine.logs[stateMachine.commitIndex - 1])
+            req.lastLogTerm = stateMachine.logs[stateMachine.commitIndex - 1][2] if len(stateMachine.logs) >= 1 else 0
             rep = self.exceptioncallrpc(self.stubList[arg].RequestVote, req, arg)
             return rep, arg
         # print('asking for vote')
         with futures.ThreadPoolExecutor(max_workers = 5) as executor:
             results = executor.map(parallelVoting, self.stubList.keys())
 
-        for rep in results:
+        for res in results:
             # if node is dead, then how we handle the situation
             # handled
             
-            if rep[0] != None:
-                if rep.success:
-                    stateMachine.writeDump(f'Vote granted for Node {rep[1]} in term {stateMachine.currentTerm}.')
+            if res[0] != None:
+                if res[0].voteGranted:
+                    stateMachine.writeDump(f'Vote granted for Node {res[1]} in term {stateMachine.currentTerm}.')
                 else:
-                    stateMachine.writeDump(f'Vote denied for Node {rep[1]} in term {stateMachine.currentTerm}.')
-                votes.append(rep[0])
-        voteTotal = len(list(filter(lambda vote : vote.voteGranted, votes))) + 1
-        # print('voted granted', voteTotal)
-        if voteTotal > self.nodeTotal // 2 and stateMachine.currentLeader == None:
+                    stateMachine.writeDump(f'Vote denied for Node {res[1]} in term {stateMachine.currentTerm}.')
+                votes.append(res[0])
+        voteTotal = sum(vote.voteGranted for vote in votes) + 1
+        print('voted granted', voteTotal)
+        if voteTotal > self.totalNode // 2 and stateMachine.currentLeader == None:
             stateMachine.currentLeader = stateMachine.nodeId
             stateMachine.currentRole = 'leader'
             stateMachine.writeDump(f'New Leader waiting for Old Leader Lease to timeout.')
@@ -238,7 +231,7 @@ class NodeWorking():
             stateMachine.writeDump(f'Node {stateMachine.nodeId} became the leader for term {stateMachine.currentTerm}.')
             stateMachine.resetIndex()
             stateMachine.currentlogTerm = stateMachine.currentTerm
-            self.appendEntry(log=f'NO-OP')
+            self.appendEntry(log=f'NO-OP {stateMachine.currentTerm}')
             # self.heartbeat()
             self.leaderWorking()
         else:
@@ -248,7 +241,7 @@ class NodeWorking():
         self.waiting.start()
     def electionTimeout(self):
         electiontime = random.uniform(5, 10)
-        # print('election Time', electiontime)
+        print('election Time', electiontime)
         self.election = threading.Timer(electiontime, self.requestVote)
         self.election.start()
     def resetelection(self):
@@ -286,23 +279,24 @@ class NodeWorking():
     #         # commit failed & i dont know
     #         # pass
     def leaderWorking(self):
-        while True:
-            print("1. SET")
-            print("2. GET")
-            opt = int(input("Enter your choice: "))
-            if opt == 1 and stateMachine.currentRole == 'leader':
-                var = input("Enter your variable: ")
-                val = input("Enter value: ")
-                # stateMachine.logs = [f'SET {var} {val} {stateMachine.currentTerm}']
-                self.appendEntry(var, val)
-            elif opt == 2:
-                var = input("Enter your variable: ")
-                if var in stateMachine.logDic:
-                    print(f'value of {var} : {stateMachine.logDic[var]}')
-                else:
-                    print(f'{var} is not intialized')
-            else:
-                print('current role is not suited for this option')
+        pass
+    #     while True:
+    #         print("1. SET")
+    #         print("2. GET")
+    #         opt = int(input("Enter your choice: "))
+    #         if opt == 1 and stateMachine.currentRole == 'leader':
+    #             var = input("Enter your variable: ")
+    #             val = input("Enter value: ")
+    #             # stateMachine.logs = [f'SET {var} {val} {stateMachine.currentTerm}']
+    #             self.appendEntry(var, val)
+    #         elif opt == 2:
+    #             var = input("Enter your variable: ")
+    #             if var in stateMachine.logDic:
+    #                 print(f'value of {var} : {stateMachine.logDic[var]}')
+    #             else:
+    #                 print(f'{var} is not intialized')
+    #         else:
+    #             print('current role is not suited for this option')
     def appendEntry(self, var=None, val=None, log=None):
         # req.leasetime = 
         if var:
@@ -327,11 +321,14 @@ class NodeWorking():
             req = raft_pb2.AppendRequest()
             req.term = stateMachine.currentTerm
             req.leaderId = stateMachine.nodeId
-            req.prevLogIndex = stateMachine.nextIndex[arg](0) - 1
-            req.prevLogTerm = stateMachine.logs[stateMachine.nextIndex[arg] - 1](2) if len(stateMachine.logs) != 1 else 0
+            req.prevLogIndex = stateMachine.nextIndex[arg - 1] - 1
+            print(stateMachine.nextIndex[arg - 1] - 1)
+            if len(stateMachine.logs) >= 1:
+                stateMachine.logs[stateMachine.nextIndex[arg - 1] - 1]
+            req.prevLogTerm = stateMachine.logs[stateMachine.nextIndex[arg - 1] - 1][2] if len(stateMachine.logs) >= 1 else 0
             req.leaderCommit = stateMachine.commitIndex
-            req.entries.clear()
-            req.entries.extend(stateMachine.logs[stateMachine.nextIndex[arg] - 1:])
+            # req.entries.clear()
+            req.entries.extend(log[1] for log in stateMachine.logs[stateMachine.nextIndex[arg - 1]:])
             rep = self.exceptioncallrpc(self.stubList[arg].AppendEntries, req, arg)
             return rep, len(req.entries), arg
         with futures.ThreadPoolExecutor(max_workers = 5) as executor:
@@ -343,14 +340,14 @@ class NodeWorking():
                 # Node {NodeID of follower} (follower) committed the entry {entry operation} to the state machine.
                 if rep[0].success:
                     # len(stateMachine.logs) can be used as rep[1]
-                    stateMachine.nextIndex[rep[2]] += rep[1]
+                    stateMachine.nextIndex[rep[2] - 1] += rep[1]
                     stateMachine.writeDump(f'Node {rep[2]} accepted AppendEntries RPC from {stateMachine.currentLeader}.')
                 else:
-                    stateMachine.nextIndex[rep[2]] -= 1
+                    stateMachine.nextIndex[rep[2] - 1] -= 1
                     stateMachine.writeDump(f'Node {rep[2]} rejected AppendEntries RPC from {stateMachine.currentLeader}.')
                 ack.append(rep[0])
         ackTotal = len(list(filter(lambda ak : ak.success, ack)))
-        if ackTotal > self.nodeTotal // 2:
+        if ackTotal > self.totalNode // 2:
             if var:
                 stateMachine.commitEntries(stateMachine.commitIndex)
                 # stateMachine.lastApplied = stateMachine.commitIndex
@@ -377,7 +374,7 @@ class NodeWorking():
         self.leaseThread = threading.Timer(self.leaseTime, self.stepDown)
         self.leaseThread.start()
     def resetLeaseTime(self):
-        self.lease.cancel()
+        self.leaseThread.cancel()
         self.leaseTimeOut()
     def exceptioncallrpc(self, rpc, req, followerNodeID):
         # print(rpc, req, t)

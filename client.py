@@ -4,7 +4,7 @@ import raft_pb2_grpc
 from concurrent import futures
 
 
-clusterIp = {2:'localhost:50052', 3:'localhost:50053'}
+clusterIp = {1:'localhost:50051', 2:'localhost:50052', 3:'localhost:50053'}
 
 class Client:
     def __init__(self, ips):
