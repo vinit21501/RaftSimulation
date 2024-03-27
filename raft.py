@@ -149,9 +149,28 @@ class RaftServicer(raft_pb2_grpc.RaftServicer):
                 return rep
             # handle this parameter for vote granted
             # request.lastLogIndex
-            # request.lastlogTerm
+            # request.lastlogTermdef RequestVote(self, request, context):
         rep.voteGranted = False
         return rep
+    def ServeClient(self, request, context):
+        rep = raft_pb2.ServeClientReply()
+        rep.LeaderID = stateMachine.currentLeader
+        if stateMachine.currentRole == 'leader':
+            rep.Success = True
+            if request.Request.split()[0] == 'GET':
+                if request.Request.split()[1] in stateMachine.logDic:
+                    rep.Data = stateMachine.logDic[request.Request.split()[1]]
+                else:
+                    rep.Data = None
+            elif request.Request.split()[0] == 'SET':
+                if self.appendEntry(request.Request.split()[1], request.Request.split()[2]):
+                    rep.Data = 'True'
+                else:
+                    rep.Data = 'False'
+            return rep
+        else:
+            rep.Success = False
+            return rep
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
@@ -232,8 +251,9 @@ class NodeWorking():
             stateMachine.resetIndex()
             stateMachine.currentlogTerm = stateMachine.currentTerm
             self.appendEntry(log=f'NO-OP {stateMachine.currentTerm}')
+            self.resetheartbeat()
             # self.heartbeat()
-            self.leaderWorking()
+            # self.leaderWorking()
         else:
             self.resetelection()
     def waitingOlderLeaseTime(self):
@@ -248,8 +268,9 @@ class NodeWorking():
         self.election.cancel()
         self.electionTimeout()
     def heartbeatTimeout(self):
-        heartbeatTime = random.uniform(0.9, 1.1)
-        self.beattime = threading.Timer(heartbeatTime, self.appendEntry)
+        # heartbeatTime = random.uniform(0.9, 1.1)
+        # self.beattime = threading.Timer(heartbeatTime, self.appendEntry)
+        self.beattime = threading.Timer(1, self.appendEntry)
         self.beattime.start()
     def resetheartbeat(self):
         self.beattime.cancel()
@@ -278,8 +299,8 @@ class NodeWorking():
     #         self.resetheartbeat()
     #         # commit failed & i dont know
     #         # pass
-    def leaderWorking(self):
-        pass
+    # def leaderWorking(self):
+    #     pass
     #     while True:
     #         print("1. SET")
     #         print("2. GET")
@@ -306,13 +327,13 @@ class NodeWorking():
             #     stateMachine.matchIndex[stub] += 1
             stateMachine.writeDump(f'Node {stateMachine.currentLeader} (leader) received an ({log}) request')
             stateMachine.logs.append((stateMachine.lastApplied, log, stateMachine.currentTerm))
-            stateMachine.writeDump(f'Node {stateMachine.currentLeader} (leader) committed the entry ({log}) to the state machine')
+            # stateMachine.writeDump(f'Node {stateMachine.currentLeader} (leader) committed the entry ({log}) to the state machine')
         elif log:
             stateMachine.lastApplied += 1
             # for stub in self.stubList:
             #     stateMachine.matchIndex[stub] += 1
             stateMachine.logs.append((stateMachine.lastApplied, log, stateMachine.currentTerm))
-            stateMachine.writeDump(f'Node {stateMachine.currentLeader} (leader) committed the entry ({log}) to the state machine')
+            # stateMachine.writeDump(f'Node {stateMachine.currentLeader} (leader) committed the entry ({log}) to the state machine')
         else:
             stateMachine.writeDump(f"Leader {stateMachine.currentLeader} sending heartbeat & Renewing Lease")
         stateMachine.appendEntries(log)
@@ -363,7 +384,10 @@ class NodeWorking():
             #     self.exceptioncallrpc(self.stubList[stub].AppendEntry, req, stub)
             # sending heartbeast & renewing lease
             self.resetLeaseTime()
+            self.resetheartbeat()
+            return True
         self.resetheartbeat()
+        return False
     def stepDown(self):
         stateMachine.writeDump(f'Leader {stateMachine.currentLeader} lease renewal failed. Stepping Down.')
         stateMachine.currentRole = 'follower'

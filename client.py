@@ -51,10 +51,10 @@ class Client:
         with futures.ThreadPoolExecutor(max_workers = 5) as executor:
             results = executor.map(parallelEntries, (self.stubList.keys(), log))
             for res in results:
-                if not res[0] and res[0].Success:
-                    if not res[1]:
-                        self.leaderId = res[1]
-                    return res[0]
+                if not res and res.Success:
+                    if not res:
+                        self.leaderId = res.LeaderID
+                    return res
             return False
     def setk(self):
         var = input("Enter your variable: ")
@@ -67,18 +67,37 @@ class Client:
                 if rep.Success:
                     if rep.LeaderId:
                         self.leaderId == rep.LeaderID
-                    print(f'SET IS SUCCESS')
+                    if rep.Data == 'True':
+                        print(f'SET IS SUCCESS')
+                    elif rep.Data == 'False':
+                        print('SET is Fail')
+                    else:
+                        print('pata nhi')
                 elif rep.LeaderID != None:
                     if rep.LeaderId:
                         self.leaderId = rep.LeaderID
-                elif self.getallk(log):
-                    print(f'SET IS SUCCESS')
+                else:
+                    rep = self.getallk(log)
+                    if rep:
+                        if rep.Data == 'True':
+                            print(f'SET IS SUCCESS')
+                        elif rep.Data == 'False':
+                            print('SET is Fail')
+                        else:
+                            print('pata nhi')
+                    else:
+                        print('all Nodes does not know about the leader')
+            else:
+                rep = self.getallk(log)
+                if rep:
+                    if rep.Data == 'True':
+                        print(f'SET IS SUCCESS')
+                    elif rep.Data == 'False':
+                        print('SET is Fail')
+                    else:
+                        print('pata nhi')
                 else:
                     print('all Nodes does not know about the leader')
-            elif self.getallk(log):
-                print(f'SET IS SUCCESS')
-            else:
-                print('all Nodes does not know about the leader')
     def exceptioncallrpc(self, req):
         try:
             rep = self.stubList[self.leaderId].ServeClient(req, timeout=1)
