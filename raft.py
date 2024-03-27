@@ -86,6 +86,7 @@ class State():
             else:
                 for entry in self.logs:
                     file.write(entry[1] + '\n')
+                self.logs = []
         self.export()
     def writeDump(self, query):
         with open(f'logs_node_{self.nodeId}/dump.txt', 'a') as file:
@@ -116,7 +117,7 @@ class RaftServicer(raft_pb2_grpc.RaftServicer):
         rep.term = stateMachine.currentTerm
         # if request.prevLogIndex  ==  stateMachine.lastApplied and request.prevLogTerm == stateMachine.currentlogTerm:
         print(request.term, stateMachine.currentTerm, request.prevLogTerm, stateMachine.currentlogTerm, request.prevLogIndex, stateMachine.lastApplied)
-        if request.term >= stateMachine.currentTerm and request.prevLogTerm >= stateMachine.currentlogTerm and request.prevLogIndex == stateMachine.lastApplied - 1:
+        if request.term >= stateMachine.currentTerm and request.prevLogTerm == stateMachine.currentlogTerm and request.prevLogIndex == stateMachine.lastApplied - 1:
             stateMachine.currentTerm = request.term
             rep.term = stateMachine.currentTerm
             stateMachine.currentLeader = request.leaderId
@@ -126,6 +127,7 @@ class RaftServicer(raft_pb2_grpc.RaftServicer):
             stateMachine.commitIndex = request.leaderCommit
             stateMachine.logs = list((stateMachine.lastApplied + 1 + i, log, int(log.split()[-1])) for i, log in enumerate(request.entries))
             stateMachine.appendEntries()
+            stateMachine.currentlogTerm = request.entries[-1][-1]
             stateMachine.lastApplied += len(request.entries)
             cluster.resetheartbeat()
             rep.success = True
