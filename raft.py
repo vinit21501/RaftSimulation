@@ -74,7 +74,7 @@ class State():
                 for line in file.readlines():
                     if line.startswith('SET'):
                         line = line.strip().split()
-                        self.logDic[line[1]] = line[2]
+                        self.logsDic[line[1]] = line[2]
         else:
             # os.mkdir(f'logs_node_{self.nodeId}')
             open(f'logs_node_{self.nodeId}/log.txt', 'w').close()
@@ -96,7 +96,7 @@ class State():
                 self.writeDump(f'Node {self.nodeId} ({self.currentRole}) committed the entry ({log}) to the state machine.')
                 if log.startswith('SET'):
                     log = log.strip().split()
-                    self.logDic[log[1]] = log[2]
+                    self.logsDic[log[1]] = log[2]
             self.logs = []
             self.export()
             return True
@@ -107,7 +107,7 @@ class State():
             self.writeDump(f'Node {self.nodeId} ({self.currentRole}) committed the entry ({log}) to the state machine.')
             if log.startswith('SET'):
                 log = log.strip().split()
-                self.logDic[log[1]] = log[2]
+                self.logsDic[log[1]] = log[2]
         self.export()
 
 class RaftServicer(raft_pb2_grpc.RaftServicer):
@@ -158,12 +158,12 @@ class RaftServicer(raft_pb2_grpc.RaftServicer):
         if stateMachine.currentRole == 'leader':
             rep.Success = True
             if request.Request.split()[0] == 'GET':
-                if request.Request.split()[1] in stateMachine.logDic:
-                    rep.Data = stateMachine.logDic[request.Request.split()[1]]
+                if request.Request.split()[1] in stateMachine.logsDic:
+                    rep.Data = stateMachine.logsDic[request.Request.split()[1]]
                 else:
                     rep.Data = None
             elif request.Request.split()[0] == 'SET':
-                if self.appendEntry(request.Request.split()[1], request.Request.split()[2]):
+                if cluster.appendEntry(request.Request.split()[1], request.Request.split()[2]):
                     rep.Data = 'True'
                 else:
                     rep.Data = 'False'

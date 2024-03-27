@@ -29,7 +29,7 @@ message AppendRequest {
 
 message AppendReply {
 	int32 term = 1;
-	bool success = 3;
+	bool success = 2;
 }
 
 message RequestVoteRequest {

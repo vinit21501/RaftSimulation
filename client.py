@@ -19,7 +19,7 @@ class Client:
             rep = self.exceptioncallrpc(req)
             if rep != None:
                 if rep.Success:
-                    self.leaderId == rep.LeaderID
+                    self.leaderId = rep.LeaderID
                     if rep.Data == '':
                         print("K doesn't exist in the database")
                     else:
@@ -51,8 +51,8 @@ class Client:
         with futures.ThreadPoolExecutor(max_workers = 5) as executor:
             results = executor.map(parallelEntries, (self.stubList.keys(), log))
             for res in results:
-                if not res and res.Success:
-                    if not res:
+                if res and res.Success:
+                    if res.LeaderID:
                         self.leaderId = res.LeaderID
                     return res
             return False
@@ -65,8 +65,8 @@ class Client:
             rep = self.exceptioncallrpc(req)
             if rep != None:
                 if rep.Success:
-                    if rep.LeaderId:
-                        self.leaderId == rep.LeaderID
+                    if rep.LeaderID:
+                        self.leaderId = rep.LeaderID
                     if rep.Data == 'True':
                         print(f'SET IS SUCCESS')
                     elif rep.Data == 'False':
