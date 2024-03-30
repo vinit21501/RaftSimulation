@@ -81,11 +81,14 @@ class State():
     def appendEntries(self, log=None):
         with open(f'logs_node_{self.nodeId}/log.txt', 'a') as file:
             # for entry in self.logs:
-            if log != None:
+            if log:
                 file.write(log + '\n')
             else:
                 for entry in self.logs:
                     file.write(entry[1] + '\n')
+                # print(self.logs)
+                self.currentlogTerm = self.logs[-1][1].split()[-1]
+                self.lastApplied += len(self.logs)
                 self.logs = []
         self.export()
     def writeDump(self, query):
@@ -95,9 +98,11 @@ class State():
         if leaderCommit > self.commitIndex:
             for log in self.logs:
                 self.writeDump(f'Node {self.nodeId} ({self.currentRole}) committed the entry ({log}) to the state machine.')
+                log = log[1]
                 if log.startswith('SET'):
                     log = log.strip().split()
                     self.logsDic[log[1]] = log[2]
+            self.commitIndex = leaderCommit
             self.logs = []
             self.export()
             return True
@@ -106,9 +111,11 @@ class State():
     def leaderCommitEntries(self):
         for log in self.logs[self.commitIndex:]:
             self.writeDump(f'Node {self.nodeId} ({self.currentRole}) committed the entry ({log}) to the state machine.')
+            log = log[1]
             if log.startswith('SET'):
                 log = log.strip().split()
                 self.logsDic[log[1]] = log[2]
+        self.commitIndex = len(self.logs)
         self.export()
 
 class RaftServicer(raft_pb2_grpc.RaftServicer):
@@ -117,29 +124,33 @@ class RaftServicer(raft_pb2_grpc.RaftServicer):
         rep.term = stateMachine.currentTerm
         # if request.prevLogIndex  ==  stateMachine.lastApplied and request.prevLogTerm == stateMachine.currentlogTerm:
         print(request.term, stateMachine.currentTerm, request.prevLogTerm, stateMachine.currentlogTerm, request.prevLogIndex, stateMachine.lastApplied)
-        if request.term >= stateMachine.currentTerm and request.prevLogTerm == stateMachine.currentlogTerm and request.prevLogIndex == stateMachine.lastApplied - 1:
+        if request.term >= stateMachine.currentTerm and request.prevLogTerm >= stateMachine.currentlogTerm and request.prevLogIndex == stateMachine.lastApplied - 1:
+            # print('append entry accepted', request.entries)
             stateMachine.currentTerm = request.term
             rep.term = stateMachine.currentTerm
             stateMachine.currentLeader = request.leaderId
+            # stateMachine.votedFor = None
+            # stateMachine.currentRole = 'follower'
             # request.leaderId
             # request.leaderCommit
+            # print('commitsdf')
             stateMachine.commitEntries(request.leaderCommit)
-            stateMachine.commitIndex = request.leaderCommit
+            # stateMachine.commitIndex = request.leaderCommit
             stateMachine.logs = list((stateMachine.lastApplied + 1 + i, log, int(log.split()[-1])) for i, log in enumerate(request.entries))
             stateMachine.appendEntries()
-            stateMachine.currentlogTerm = request.entries[-1][-1]
-            stateMachine.lastApplied += len(request.entries)
-            cluster.resetheartbeat()
+            # stateMachine.currentlogTerm = request.entries[-1][-1]
+            # stateMachine.lastApplied += len(request.entries)
+            cluster.resetelection()
             rep.success = True
             return rep
-        cluster.resetheartbeat()
+        cluster.resetelection()
         rep.success = False
         return rep
     def RequestVote(self, request, context):
         rep = raft_pb2.RequestVoteReply()
         rep.term = stateMachine.currentTerm
         if stateMachine.votedFor == None and stateMachine.currentRole != 'candidate':
-            print(request.term, stateMachine.currentTerm, stateMachine.lastApplied, request.lastLogIndex, stateMachine.currentlogTerm, request.lastLogTerm)
+            # print(request.term, stateMachine.currentTerm, stateMachine.lastApplied, request.lastLogIndex, stateMachine.currentlogTerm, request.lastLogTerm)
             if request.term >= stateMachine.currentTerm and stateMachine.lastApplied <= request.lastLogIndex and stateMachine.currentlogTerm <= request.lastLogTerm:
                 stateMachine.votedFor = request.candidateId
                 rep.voteGranted = True
@@ -147,7 +158,7 @@ class RaftServicer(raft_pb2_grpc.RaftServicer):
                 # currentRole = 'follower'
                 # cancel the election or restart
                 cluster.resetelection()
-                print("voted for", request.candidateId)
+                # print("voted for", request.candidateId)
                 return rep
             # handle this parameter for vote granted
             # request.lastLogIndex
@@ -204,10 +215,10 @@ class NodeWorking():
             req.candidateId = stateMachine.nodeId
             req.term = stateMachine.currentTerm
             req.lastLogIndex = stateMachine.commitIndex
-            print(stateMachine.logs)
-            print(stateMachine.commitIndex)
-            if len(stateMachine.logs) >= 1:
-                print(stateMachine.logs[stateMachine.commitIndex - 1])
+            # print(stateMachine.logs)
+            # print(stateMachine.commitIndex)
+            # if len(stateMachine.logs) >= 1:
+            #     print(stateMachine.logs[stateMachine.commitIndex - 1])
             req.lastLogTerm = stateMachine.logs[stateMachine.commitIndex - 1][2] if len(stateMachine.logs) >= 1 else 0
             rep = self.exceptioncallrpc(self.stubList[arg].RequestVote, req, arg)
             return rep, arg
@@ -262,6 +273,8 @@ class NodeWorking():
         self.waiting = threading.Timer(self.leaseTime, self.afterOlderLeaseTime)
         self.waiting.start()
     def electionTimeout(self):
+        stateMachine.votedFor = None
+        stateMachine.currentRole = 'follower'
         electiontime = random.uniform(5, 10)
         print('election Time', electiontime)
         self.election = threading.Timer(electiontime, self.requestVote)
@@ -338,7 +351,8 @@ class NodeWorking():
             # stateMachine.writeDump(f'Node {stateMachine.currentLeader} (leader) committed the entry ({log}) to the state machine')
         else:
             stateMachine.writeDump(f"Leader {stateMachine.currentLeader} sending heartbeat & Renewing Lease")
-        stateMachine.appendEntries(log)
+        if log:
+            stateMachine.appendEntries(log)
         ack = []
         def parallelEntries(arg):
             req = raft_pb2.AppendRequest()
@@ -351,7 +365,8 @@ class NodeWorking():
             req.prevLogTerm = stateMachine.logs[stateMachine.nextIndex[arg - 1] - 1][2] if len(stateMachine.logs) >= 1 else 0
             req.leaderCommit = stateMachine.commitIndex
             # req.entries.clear()
-            req.entries.extend(log[1] for log in stateMachine.logs[stateMachine.nextIndex[arg - 1]:])
+            if stateMachine.logs[stateMachine.nextIndex[arg - 1]:]:
+                req.entries.extend(log[1] for log in stateMachine.logs[stateMachine.nextIndex[arg - 1]:])
             rep = self.exceptioncallrpc(self.stubList[arg].AppendEntries, req, arg)
             return rep, len(req.entries), arg
         with futures.ThreadPoolExecutor(max_workers = 5) as executor:
@@ -371,14 +386,15 @@ class NodeWorking():
                 ack.append(rep[0])
         ackTotal = len(list(filter(lambda ak : ak.success, ack)))
         if ackTotal > self.totalNode // 2:
-            if var:
-                stateMachine.commitEntries(stateMachine.commitIndex)
-                # stateMachine.lastApplied = stateMachine.commitIndex
-                stateMachine.commitIndex = len(stateMachine.logs)
-                # stateMachine.logDic[var] = val
-            elif log:
-                # stateMachine.lastApplied = stateMachine.commitIndex
-                stateMachine.commitIndex = len(stateMachine.logs)
+            stateMachine.leaderCommitEntries()
+            # if var:
+            #     stateMachine.lastApplied = stateMachine.commitIndex
+            #     stateMachine.commitIndex = len(stateMachine.logs)
+            #     stateMachine.logDic[var] = val
+            # elif log:
+            #     stateMachine.lastApplied = stateMachine.commitIndex
+            #     stateMachine.commitIndex = len(stateMachine.logs)
+            #     stateMachine.export()
             # log = f'SET {var} {val} {stateMachine.currentTerm}'
             # stateMachine.writeFile('log', log)
             # req = raft_pb2.heartbeatRequest()
@@ -394,6 +410,7 @@ class NodeWorking():
         stateMachine.writeDump(f'Leader {stateMachine.currentLeader} lease renewal failed. Stepping Down.')
         stateMachine.currentRole = 'follower'
         stateMachine.currentLeader = None
+        self.beattime.cancel()
         stateMachine.writeDump(f'{stateMachine.nodeId} Stepping down"')
         self.electionTimeout()
     def leaseTimeOut(self):
@@ -405,9 +422,10 @@ class NodeWorking():
     def exceptioncallrpc(self, rpc, req, followerNodeID):
         # print(rpc, req, t)
         try:
-            rep = rpc(req, timeout=1)
+            rep = rpc(req)
             return rep
-        except:
+        except Exception as e:
+            print(e)
             stateMachine.writeDump(f'Error occurred while sending RPC to Node {followerNodeID}.')
             # dump node is not alive
             return None
